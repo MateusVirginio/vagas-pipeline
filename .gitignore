@@ -1,0 +1,20 @@
+# Airflow
+logs/
+*.pyc
+__pycache__/
+
+# Dados
+data/
+
+# Ambiente
+.env
+.venv/
+
+# Python
+*.egg-info/
+.uv/
+uv.lock
+main.py
+
+# OS
+.DS_Store
