@@ -12,8 +12,8 @@ cleaned as (
         initcap(trim(empresa)) as empresa,
 
         -- Padroniza cidade e estado
-        initcap(trim(cidade)) as cidade,
-        initcap(trim(estado)) as estado,
+        nullif(initcap(trim(cidade)), '') as cidade,
+        nullif(initcap(trim(estado)), '') as estado,
 
         -- Classifica senioridade com base no titulo da vaga
         case
