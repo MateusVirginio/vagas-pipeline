@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: public
+    database: airflow
+    schema: public
+    tables:
+      - name: vagas_raw
+        description: "Tabela bruta com vagas coletadas do Gupy e LinkedIn"
