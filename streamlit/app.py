@@ -15,15 +15,12 @@ st.set_page_config(
 # -------------------------------------------------------------------
 # Conexão com o banco
 # -------------------------------------------------------------------
-@st.cache_resource
-def get_connection():
-    return psycopg2.connect(st.secrets["DATABASE_URL"])
-
 @st.cache_data(ttl=3600)
 def load_data(query: str) -> pd.DataFrame:
-    conn = get_connection()
-    return pd.read_sql(query, conn)
-
+    conn = psycopg2.connect(st.secrets["DATABASE_URL"])
+    df = pd.read_sql(query, conn)
+    conn.close()
+    return df
 # -------------------------------------------------------------------
 # Carrega os dados
 # -------------------------------------------------------------------
