@@ -17,13 +17,7 @@ st.set_page_config(
 # -------------------------------------------------------------------
 @st.cache_resource
 def get_connection():
-    return psycopg2.connect(
-        host="localhost",
-        database="airflow",
-        user="airflow",
-        password="airflow",
-        port=5432,
-    )
+    return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 @st.cache_data(ttl=3600)
 def load_data(query: str) -> pd.DataFrame:

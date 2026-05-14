@@ -2,7 +2,6 @@ version: 2
 
 sources:
   - name: public
-    database: airflow
     schema: public
     tables:
       - name: vagas_raw
