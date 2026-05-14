@@ -1,27 +1,53 @@
-# 📊 Vagas Pipeline — Pipeline de Vagas de Dados no Brasil
+# 📊 Vagas Pipeline — Mercado de Dados no Brasil
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)
 ![Apache Airflow](https://img.shields.io/badge/Apache%20Airflow-2.9.2-017CEE?logo=apacheairflow)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?logo=postgresql)
+![dbt](https://img.shields.io/badge/dbt-1.11-FF694B?logo=dbt)
+![Streamlit](https://img.shields.io/badge/Streamlit-online-FF4B4B?logo=streamlit)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)
 
-Pipeline de dados **end-to-end** que coleta, processa e armazena vagas da área de dados no Brasil diariamente via API do Gupy.
+Pipeline de dados **end-to-end** com arquitetura Medallion que coleta, transforma e visualiza vagas da área de dados no Brasil diariamente.
+
+🔗 **[Dashboard ao vivo](https://vagas-pipeline.streamlit.app)**
 
 ---
 
 ## 🎯 Problema resolvido
 
-O mercado de dados no Brasil cresce rapidamente, mas é difícil ter uma visão consolidada das vagas abertas, skills mais demandadas e regiões com mais oportunidades. Este pipeline coleta automaticamente vagas de cargos como Engenheiro de Dados, Cientista de Dados e Analista de Dados, centralizando tudo em um banco de dados pronto para análise.
+O mercado de dados no Brasil cresce rapidamente, mas é difícil ter uma visão consolidada das vagas abertas, empresas que mais contratam e distribuição por senioridade e região. Este pipeline coleta automaticamente vagas de Engenheiro de Dados, Cientista de Dados, Analista de Dados e outros cargos da área, centralizando tudo em um dashboard interativo atualizado diariamente.
 
 ---
 
-## 🏗️ Arquitetura
+## 🏗️ Arquitetura Medallion
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌────────────────┐     ┌──────────────┐
-│   API Gupy  │────▶│    Python    │────▶│ Apache Airflow │────▶│  PostgreSQL  │
-│  (source)   │     │  (coleta)    │     │ (orquestração) │     │ (armazena)   │
-└─────────────┘     └──────────────┘     └────────────────┘     └──────────────┘
+┌──────────────┐   ┌──────────────┐
+│   API Gupy   │   │   LinkedIn   │
+└──────┬───────┘   └──────┬───────┘
+       └─────────┬─────────┘
+                 ▼
+        ┌────────────────┐
+        │ Python+Airflow │  Orquestração diária
+        └────────┬───────┘
+                 ▼
+        ┌────────────────┐
+        │  Bronze Layer  │  vagas_raw (PostgreSQL)
+        └────────┬───────┘
+                 ▼
+        ┌────────────────┐
+        │  Silver Layer  │  stg_vagas (dbt)
+        └────────┬───────┘
+                 ▼
+        ┌────────────────┐
+        │   Gold Layer   │  vagas_por_estado
+        │                │  vagas_por_senioridade  (dbt)
+        │                │  vagas_por_empresa
+        └────────┬───────┘
+                 ▼
+        ┌────────────────┐
+        │   Streamlit    │  Dashboard publicado online
+        └────────────────┘
 ```
 
 A DAG executa diariamente com duas tasks em sequência:
@@ -37,9 +63,11 @@ coletar_vagas  ──▶  salvar_no_postgres
 | Camada | Tecnologia | Função |
 |---|---|---|
 | Orquestração | Apache Airflow 2.9 | Agendamento e monitoramento do pipeline |
-| Coleta | Python + Requests | Consumo da API do Gupy |
-| Processamento | Pandas | Limpeza e deduplicação dos dados |
+| Coleta | Python + Requests + BeautifulSoup | API Gupy + scraping LinkedIn |
 | Armazenamento | PostgreSQL 15 | Persistência das vagas coletadas |
+| Transformação | dbt 1.11 | Camadas Silver e Gold (arquitetura Medallion) |
+| Visualização | Streamlit + Plotly | Dashboard interativo publicado online |
+| Banco na nuvem | Neon (PostgreSQL serverless) | Banco de produção para o dashboard |
 | Infraestrutura | Docker + Compose | Ambiente reproduzível e isolado |
 | Gerenciamento | UV | Gerenciamento de dependências Python |
 
@@ -50,12 +78,24 @@ coletar_vagas  ──▶  salvar_no_postgres
 ```
 vagas-pipeline/
 ├── dags/
-│   └── pipeline_vagas.py   # DAG do Airflow com @task decorator
+│   └── pipeline_vagas.py        # DAG do Airflow com @task decorator
 ├── src/
 │   ├── __init__.py
-│   └── collect.py          # Lógica de coleta (Extract) e carga (Load)
-├── docker-compose.yaml     # Airflow + PostgreSQL + Redis
-├── pyproject.toml          # Dependências gerenciadas pelo UV
+│   └── collect.py               # Extract (Gupy + LinkedIn) e Load
+├── dbt/
+│   └── vagas/
+│       └── models/
+│           ├── staging/
+│           │   ├── sources.yml
+│           │   └── stg_vagas.sql        # Silver: limpeza e padronização
+│           └── marts/
+│               ├── vagas_por_estado.sql
+│               ├── vagas_por_senioridade.sql
+│               └── vagas_por_empresa.sql
+├── streamlit/
+│   └── app.py                   # Dashboard interativo
+├── docker-compose.yaml
+├── pyproject.toml
 └── .gitignore
 ```
 
@@ -75,78 +115,64 @@ cd vagas-pipeline
 
 ### 2. Configure o ambiente
 ```bash
-# Cria o .env com seu UID (obrigatório no Linux)
 echo "AIRFLOW_UID=$(id -u)" > .env
-
-# Instala as dependências Python
 uv sync
+source .venv/bin/activate
 ```
 
-### 3. Inicializa o Airflow
+### 3. Sobe o Airflow
 ```bash
 docker compose up airflow-init
-```
-Aguarda a mensagem: `User "airflow" created with role "Admin"`
-
-### 4. Sobe os serviços
-```bash
 docker compose up -d
 ```
 
-### 5. Acesse o painel
-- URL: http://localhost:8080
-- Usuário: `airflow`
-- Senha: `airflow`
+Acesse http://localhost:8080 — usuário e senha: `airflow`
 
-Ative a DAG `pipeline_vagas_dados` e clique em ▶️ para o primeiro run.
-
----
-
-## 🗄️ Estrutura dos dados
-
-```sql
-CREATE TABLE vagas_raw (
-    id            BIGINT PRIMARY KEY,
-    nome          VARCHAR(500),   -- título da vaga
-    empresa       VARCHAR(500),
-    cidade        VARCHAR(200),
-    estado        VARCHAR(100),
-    tipo_contrato VARCHAR(100),
-    regime        VARCHAR(100),   -- remoto, híbrido, presencial
-    publicado_em  TIMESTAMP,
-    url           TEXT,
-    coletado_em   TIMESTAMP DEFAULT NOW()
-);
+### 4. Rode as transformações dbt
+```bash
+cd dbt/vagas
+dbt run
 ```
 
-### Exemplos de vagas coletadas
-
-| Cargo | Empresa | Estado |
-|---|---|---|
-| Engenheiro de Dados | — | SP |
-| Cientista de Dados | — | RJ |
-| Analista de Dados \| Azure | — | MG |
-| Data Engineer \| Home-Office | — | Remoto |
-
----
-
-## 🔍 Keywords monitoradas
-
-```python
-"engenheiro de dados", "data engineer",
-"cientista de dados", "data scientist",
-"analista de dados", "data analyst",
-"analytics engineer", "data quality",
-"arquiteto de dados", "data architect"
+### 5. Sobe o dashboard
+```bash
+cd ../..
+streamlit run streamlit/app.py
 ```
 
 ---
 
-## 📈 Próximos passos
+## 🗄️ Modelos dbt
 
-- [ ] Camada de transformação com **dbt** (modelos analíticos sobre `vagas_raw`)
-- [ ] Dashboard interativo com **Streamlit** publicado online
-- [ ] Deploy na **AWS** (S3 + RDS + MWAA)
-- [ ] Análise de skills mais demandadas por região
+### Silver — `stg_vagas`
+Limpeza e padronização da camada bruta:
+- Padronização de texto com `initcap` e `trim`
+- Classificação de senioridade (Júnior, Pleno, Sênior, Especialista, Estágio)
+- Classificação de regime (Remoto, Híbrido, Presencial)
+- Tratamento de nulos com `nullif`
+
+### Gold — modelos analíticos
+| Modelo | Descrição |
+|---|---|
+| `vagas_por_estado` | Distribuição geográfica com breakdown por fonte |
+| `vagas_por_senioridade` | Distribuição por nível com percentual |
+| `vagas_por_empresa` | Top empresas que mais contratam |
 
 ---
+
+## 🔍 Cargos monitorados
+
+```
+Engenheiro de Dados · Data Engineer
+Cientista de Dados · Data Scientist
+Analista de Dados · Data Analyst
+Analytics Engineer · Data Quality
+Arquiteto de Dados · Data Architect
+```
+
+---
+
+## 👤 Autor
+
+**Mateus Virginio**
+[LinkedIn](https://linkedin.com/in/mateusvirginio) · [GitHub](https://github.com/mateusvirginio) · [Dashboard](https://vagas-pipeline.streamlit.app)
