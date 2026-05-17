@@ -19,13 +19,7 @@ GUPY_API_URL = "https://portal.api.gupy.io/api/v1/jobs"
 LINKEDIN_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 DATA_DIR = "/opt/airflow/logs/raw_data"
 
-DB_CONFIG = {
-    "host": "postgres",
-    "database": "airflow",
-    "user": "airflow",
-    "password": "airflow",
-    "port": 5432,
-}
+WAREHOUSE_URL = os.environ["WAREHOUSE_DATABASE_URL"]
 
 KEYWORDS = [
     "engenheiro de dados",
@@ -185,7 +179,7 @@ def save_to_postgres(**context):
     with open(latest_file, "r", encoding="utf-8") as f:
         jobs = json.load(f)
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = psycopg2.connect(WAREHOUSE_URL)
     cur = conn.cursor()
 
     cur.execute("""
