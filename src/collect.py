@@ -52,6 +52,7 @@ def _fetch_gupy() -> list[dict]:
     for keyword in KEYWORDS:
         logger.info(f"[Gupy] Coletando: '{keyword}'")
         collected = 0
+        seen_ids = set()
         try:
             while collected < GUPY_MAX_JOBS_PER_KEYWORD:
                 limit = min(GUPY_PAGE_SIZE, GUPY_MAX_JOBS_PER_KEYWORD - collected)
@@ -67,6 +68,14 @@ def _fetch_gupy() -> list[dict]:
                 )
                 if not jobs:
                     break
+                page_ids = {job.get("id") for job in jobs if job.get("id") is not None}
+                if not page_ids - seen_ids:
+                    logger.warning(
+                        f"[Gupy] '{keyword}' | offset={collected} | "
+                        "página sem IDs novos; encerrando paginação"
+                    )
+                    break
+                seen_ids.update(page_ids)
                 for job in jobs:
                     all_jobs.append({
                         "id": f"gupy_{job.get('id')}",
@@ -82,7 +91,7 @@ def _fetch_gupy() -> list[dict]:
                     })
                 collected += len(jobs)
                 # O portal pode informar total=100 mesmo com páginas posteriores.
-                # Só a página vazia ou o teto garantem o fim da coleta.
+                # Encerramos por página vazia, ausência de IDs novos ou teto.
                 if collected >= GUPY_MAX_JOBS_PER_KEYWORD:
                     break
                 time.sleep(GUPY_PAGE_DELAY_SECONDS)

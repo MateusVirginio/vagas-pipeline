@@ -154,7 +154,7 @@ python3 -m json.tool /tmp/gupy.json
 
 O JSON contém `data` e `pagination` (`total`, `limit`, `offset`). O portal pode
 retornar `total=100` mesmo quando há mais páginas. Por isso, o coletor avança o
-`offset` pela quantidade recebida até uma página vazia ou 500 vagas por
+`offset` pela quantidade recebida até uma página vazia, uma página sem IDs novos ou 500 vagas por
 palavra-chave, com uma pausa de 0,5 segundo entre páginas. Os logs mostram cada
 página e o acumulado por palavra-chave; erros preservam as páginas já coletadas
 e permitem continuar com o próximo termo.
