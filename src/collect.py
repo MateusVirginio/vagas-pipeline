@@ -3,6 +3,7 @@ import json
 import os
 import logging
 import re
+import time
 from datetime import datetime
 
 from bs4 import BeautifulSoup
@@ -15,7 +16,10 @@ logger = logging.getLogger(__name__)
 # -------------------------------------------------------------------
 # Configurações
 # -------------------------------------------------------------------
-GUPY_API_URL = "https://portal.api.gupy.io/api/v1/jobs"
+GUPY_API_URL = "https://portal.gupy.io/api/job-search/jobs"
+GUPY_PAGE_SIZE = 100
+GUPY_MAX_JOBS_PER_KEYWORD = 500
+GUPY_PAGE_DELAY_SECONDS = 0.5
 LINKEDIN_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 DATA_DIR = "/opt/airflow/logs/raw_data"
 
@@ -47,27 +51,44 @@ def _fetch_gupy() -> list[dict]:
     all_jobs = []
     for keyword in KEYWORDS:
         logger.info(f"[Gupy] Coletando: '{keyword}'")
+        collected = 0
         try:
-            params = {"jobName": keyword, "limit": 100, "offset": 0}
-            response = requests.get(GUPY_API_URL, params=params, headers=HEADERS, timeout=30)
-            response.raise_for_status()
-            jobs = response.json().get("data", [])
-            for job in jobs:
-                all_jobs.append({
-                    "id": f"gupy_{job.get('id')}",
-                    "nome": job.get("name"),
-                    "empresa": job.get("careerPageName"),
-                    "cidade": job.get("city"),
-                    "estado": job.get("state"),
-                    "tipo_contrato": job.get("contractType"),
-                    "regime": job.get("workplaceType"),
-                    "publicado_em": job.get("publishedDate"),
-                    "url": job.get("jobUrl"),
-                    "fonte": "gupy",
-                })
-            logger.info(f"  → {len(jobs)} vagas encontradas")
+            while collected < GUPY_MAX_JOBS_PER_KEYWORD:
+                limit = min(GUPY_PAGE_SIZE, GUPY_MAX_JOBS_PER_KEYWORD - collected)
+                params = {"jobName": keyword, "limit": limit, "offset": collected}
+                response = requests.get(GUPY_API_URL, params=params, headers=HEADERS, timeout=30)
+                response.raise_for_status()
+                payload = response.json()
+                jobs = payload.get("data", [])[:limit]
+                total = payload.get("pagination", {}).get("total")
+                logger.info(
+                    f"[Gupy] '{keyword}' | offset={collected} | "
+                    f"página={len(jobs)} | total disponível={total}"
+                )
+                if not jobs:
+                    break
+                for job in jobs:
+                    all_jobs.append({
+                        "id": f"gupy_{job.get('id')}",
+                        "nome": job.get("name"),
+                        "empresa": job.get("careerPageName"),
+                        "cidade": job.get("city"),
+                        "estado": job.get("state"),
+                        "tipo_contrato": job.get("type"),
+                        "regime": job.get("workplaceType"),
+                        "publicado_em": job.get("publishedDate"),
+                        "url": job.get("jobUrl"),
+                        "fonte": "gupy",
+                    })
+                collected += len(jobs)
+                # O portal pode informar total=100 mesmo com páginas posteriores.
+                # Só a página vazia ou o teto garantem o fim da coleta.
+                if collected >= GUPY_MAX_JOBS_PER_KEYWORD:
+                    break
+                time.sleep(GUPY_PAGE_DELAY_SECONDS)
         except requests.RequestException as e:
             logger.error(f"[Gupy] Erro para '{keyword}': {e}")
+        logger.info(f"[Gupy] '{keyword}' → {collected} vagas coletadas")
     return all_jobs
 
 

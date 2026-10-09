@@ -142,6 +142,33 @@ streamlit run streamlit/app.py
 
 ---
 
+### Verificar a API da Gupy
+
+```bash
+curl -sS --fail-with-body --get 'https://portal.gupy.io/api/job-search/jobs' \
+  --data-urlencode 'jobName=analista de dados' \
+  --data-urlencode 'limit=100' \
+  --data-urlencode 'offset=100' -o /tmp/gupy.json
+python3 -m json.tool /tmp/gupy.json
+```
+
+O JSON contém `data` e `pagination` (`total`, `limit`, `offset`). O portal pode
+retornar `total=100` mesmo quando há mais páginas. Por isso, o coletor avança o
+`offset` pela quantidade recebida até uma página vazia ou 500 vagas por
+palavra-chave, com uma pausa de 0,5 segundo entre páginas. Os logs mostram cada
+página e o acumulado por palavra-chave; erros preservam as páginas já coletadas
+e permitem continuar com o próximo termo.
+
+Para executar os testes de paginação:
+
+```bash
+uv run python -m unittest discover -s tests
+```
+
+Para verificar a carga, compare `SELECT count(*) FROM vagas_raw;` antes e depois
+de executar a DAG. A contagem só aumenta se houver IDs novos, pois a carga usa
+`ON CONFLICT (id) DO NOTHING`.
+
 ## 🗄️ Modelos dbt
 
 ### Silver — `stg_vagas`
