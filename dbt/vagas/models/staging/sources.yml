@@ -5,4 +5,4 @@ sources:
     schema: public
     tables:
       - name: vagas_raw
-        description: "Tabela bruta com vagas coletadas do Gupy e LinkedIn"
+        description: "Tabela bruta com vagas coletadas do Gupy"

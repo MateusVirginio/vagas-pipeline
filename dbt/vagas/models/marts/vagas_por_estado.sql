@@ -5,9 +5,7 @@ with base as (
 
 select
     estado,
-    count(*)                                            as total_vagas,
-    count(*) filter (where fonte = 'linkedin')          as vagas_linkedin,
-    count(*) filter (where fonte = 'gupy')              as vagas_gupy
+    count(*) as total_vagas
 from base
 group by estado
 order by total_vagas desc

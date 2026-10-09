@@ -27,13 +27,13 @@ def load_data(query: str) -> pd.DataFrame:
 df_estado      = load_data("select * from vagas_por_estado")
 df_senioridade = load_data("select * from vagas_por_senioridade")
 df_empresa     = load_data("select * from vagas_por_empresa")
-df_vagas       = load_data("select cargo, empresa, cidade, estado, senioridade, regime_trabalho, fonte, data_coleta from stg_vagas")
+df_vagas       = load_data("select cargo, empresa, cidade, estado, senioridade, regime_trabalho, data_coleta from stg_vagas")
 
 # -------------------------------------------------------------------
 # Header
 # -------------------------------------------------------------------
 st.title("📊 Mercado de Dados no Brasil")
-st.markdown("Pipeline de coleta diária de vagas via **Gupy** e **LinkedIn**")
+st.markdown("Pipeline de coleta diária de vagas via **Gupy**")
 st.divider()
 
 # -------------------------------------------------------------------
@@ -98,9 +98,7 @@ fig_empresa = px.bar(
     df_empresa.head(15),
     x="empresa",
     y="total_vagas",
-    color="fonte",
-    color_discrete_map={"linkedin": "#0077B5", "gupy": "#00C853"},
-    labels={"total_vagas": "Total de Vagas", "empresa": "Empresa", "fonte": "Fonte"},
+    labels={"total_vagas": "Total de Vagas", "empresa": "Empresa"},
 )
 fig_empresa.update_layout(height=400, xaxis_tickangle=-30)
 st.plotly_chart(fig_empresa, use_container_width=True)
@@ -112,7 +110,7 @@ st.divider()
 # -------------------------------------------------------------------
 st.subheader("🔍 Explorar vagas")
 
-col_f1, col_f2, col_f3 = st.columns(3)
+col_f1, col_f2 = st.columns(2)
 
 with col_f1:
     filtro_senioridade = st.multiselect(
@@ -128,20 +126,11 @@ with col_f2:
         default=[],
     )
 
-with col_f3:
-    filtro_fonte = st.multiselect(
-        "Fonte",
-        options=df_vagas["fonte"].unique(),
-        default=[],
-    )
-
 df_filtrado = df_vagas.copy()
 if filtro_senioridade:
     df_filtrado = df_filtrado[df_filtrado["senioridade"].isin(filtro_senioridade)]
 if filtro_regime:
     df_filtrado = df_filtrado[df_filtrado["regime_trabalho"].isin(filtro_regime)]
-if filtro_fonte:
-    df_filtrado = df_filtrado[df_filtrado["fonte"].isin(filtro_fonte)]
 
 st.dataframe(df_filtrado, use_container_width=True, height=400)
 st.caption(f"Mostrando {len(df_filtrado)} de {total} vagas")

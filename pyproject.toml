@@ -5,7 +5,6 @@ description = "description"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "beautifulsoup4>=4.14.3",
     "dbt-postgres>=1.10.0",
     "pandas>=3.0.2",
     "plotly>=6.7.0",

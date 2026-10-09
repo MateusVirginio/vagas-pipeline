@@ -22,10 +22,9 @@ O mercado de dados no Brasil cresce rapidamente, mas é difícil ter uma visão 
 ## 🏗️ Arquitetura Medallion
 
 ```
-┌──────────────┐   ┌──────────────┐
-│   API Gupy   │   │   LinkedIn   │
-└──────┬───────┘   └──────┬───────┘
-       └─────────┬─────────┘
+        ┌────────────────┐
+        │    API Gupy    │
+        └────────┬───────┘
                  ▼
         ┌────────────────┐
         │ Python+Airflow │  Orquestração diária
@@ -63,7 +62,7 @@ coletar_vagas  ──▶  salvar_no_postgres
 | Camada | Tecnologia | Função |
 |---|---|---|
 | Orquestração | Apache Airflow 2.9 | Agendamento e monitoramento do pipeline |
-| Coleta | Python + Requests + BeautifulSoup | API Gupy + scraping LinkedIn |
+| Coleta | Python + Requests | API Gupy |
 | Armazenamento | PostgreSQL 15 | Persistência das vagas coletadas |
 | Transformação | dbt 1.11 | Camadas Silver e Gold (arquitetura Medallion) |
 | Visualização | Streamlit + Plotly | Dashboard interativo publicado online |
@@ -81,7 +80,7 @@ vagas-pipeline/
 │   └── pipeline_vagas.py        # DAG do Airflow com @task decorator
 ├── src/
 │   ├── __init__.py
-│   └── collect.py               # Extract (Gupy + LinkedIn) e Load
+│   └── collect.py               # Extract (Gupy) e Load
 ├── dbt/
 │   └── vagas/
 │       └── models/
@@ -181,7 +180,7 @@ Limpeza e padronização da camada bruta:
 ### Gold — modelos analíticos
 | Modelo | Descrição |
 |---|---|
-| `vagas_por_estado` | Distribuição geográfica com breakdown por fonte |
+| `vagas_por_estado` | Distribuição geográfica das vagas |
 | `vagas_por_senioridade` | Distribuição por nível com percentual |
 | `vagas_por_empresa` | Top empresas que mais contratam |
 
@@ -202,4 +201,4 @@ Arquiteto de Dados · Data Architect
 ## 👤 Autor
 
 **Mateus Virginio**
-[LinkedIn](https://linkedin.com/in/mateusvirginio) · [GitHub](https://github.com/mateusvirginio) · [Dashboard](https://vagas-pipeline.streamlit.app)
+[GitHub](https://github.com/mateusvirginio) · [Dashboard](https://vagas-pipeline.streamlit.app)
