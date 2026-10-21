@@ -1,6 +1,6 @@
 from airflow.decorators import dag, task
-from datetime import datetime, timedelta
-from src.collect import fetch_vagas, save_to_postgres
+from datetime import datetime
+from src.collect import main
 
 @dag(
     dag_id="pipeline_vagas_dados",
@@ -12,13 +12,9 @@ from src.collect import fetch_vagas, save_to_postgres
 def pipeline_vagas():
 
     @task
-    def coletar():
-        fetch_vagas()
+    def coletar_e_salvar():
+        main()
 
-    @task
-    def salvar():
-        save_to_postgres()
-
-    coletar() >> salvar()
+    coletar_e_salvar()
 
 dag = pipeline_vagas()

@@ -49,10 +49,10 @@ O mercado de dados no Brasil cresce rapidamente, mas é difícil ter uma visão 
         └────────────────┘
 ```
 
-A DAG executa diariamente com duas tasks em sequência:
+O script coleta e grava na mesma execução. A DAG existente chama esse script em uma única task:
 
 ```
-coletar_vagas  ──▶  salvar_no_postgres
+coletar_e_salvar
 ```
 
 ---
@@ -140,6 +140,28 @@ streamlit run streamlit/app.py
 ```
 
 ---
+
+### Executar a coleta diretamente
+
+Configure `WAREHOUSE_DATABASE_URL` no `.env` e execute na raiz do projeto:
+
+```bash
+uv run python src/collect.py
+```
+
+A execução coleta, remove IDs duplicados e grava diretamente no Postgres, sem
+arquivo intermediário. Se não houver vagas válidas, levanta uma exceção e sai
+com código diferente de zero antes de acessar o banco. Falhas por palavra-chave
+continuam sendo registradas; resultados das demais palavras-chave são carregados.
+As requisições usam uma Session com até três tentativas adicionais e espera
+progressiva para falhas de conexão e HTTP 429, 500, 502, 503 e 504.
+
+Para verificar o comportamento de falha sem editar o código:
+
+```bash
+GUPY_API_URL=https://portal.gupy.io/api/rota-invalida uv run python src/collect.py
+echo $?
+```
 
 ### Verificar a API da Gupy
 
