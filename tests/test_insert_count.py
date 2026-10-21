@@ -32,7 +32,7 @@ class InsertCountTests(unittest.TestCase):
                         url text, fonte text, coletado_em timestamp DEFAULT NOW()
                     )
                 """)
-            jobs = [{"id": f"teste_{i}", "nome": "Vaga de teste", "fonte": "gupy"} for i in range(250)]
+            jobs = [{"id": f"teste_{i}", "nome": "Vaga de teste", "fonte": "gupy", "descricao": "Descrição de teste"} for i in range(250)]
             with patch.object(collect.psycopg2, "connect", return_value=conn), \
                     patch.object(collect, "closing", side_effect=nullcontext):
                 for expected in (250, 0):
@@ -44,6 +44,9 @@ class InsertCountTests(unittest.TestCase):
                     with conn.cursor() as cur:
                         cur.execute("SELECT count(*) FROM vagas_raw")
                         after = cur.fetchone()[0]
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT count(*) FROM vagas_raw WHERE descricao = 'Descrição de teste'")
+                        self.assertEqual(cur.fetchone()[0], 250)
                     logged = int(logs.output[-1].split(":", 2)[-1].split()[0])
                     self.assertEqual(logged, after - before)
                     self.assertEqual(logged, expected)

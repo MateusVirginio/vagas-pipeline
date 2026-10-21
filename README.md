@@ -163,6 +163,20 @@ GUPY_API_URL=https://portal.gupy.io/api/rota-invalida uv run python src/collect.
 echo $?
 ```
 
+### Descrição da vaga
+
+`vagas_raw.descricao` é uma coluna `TEXT` preenchida com o campo `description`
+retornado na própria listagem da Gupy, sem chamada extra de detalhe. O texto é
+preservado como recebido para extração de skills e busca semântica. A carga
+adiciona a coluna automaticamente com `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`,
+permitindo atualizar bancos existentes. Registros já existentes não são
+atualizados pela carga (`ON CONFLICT DO NOTHING`).
+
+Após o reset inicial com `TRUNCATE vagas_raw`, execute a coleta e depois
+`dbt run --project-dir dbt/vagas` para atualizar as visões usadas pelo dashboard.
+O reset é uma operação manual; executar o coletor normalmente preserva as vagas
+já armazenadas. A ausência de uma vaga na coleta não a marca como fechada.
+
 ### Verificar a API da Gupy
 
 ```bash

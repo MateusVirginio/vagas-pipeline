@@ -10,7 +10,7 @@ from src import collect
 def page(size, total=None, start=0):
     response = Mock()
     response.json.return_value = {
-        "data": [{"id": index, "type": "vacancy_type_effective"} for index in range(start, start + size)]
+        "data": [{"id": index, "type": "vacancy_type_effective", "description": "Descrição da vaga"} for index in range(start, start + size)]
     }
     if total is not None:
         response.json.return_value["pagination"] = {"total": total}
@@ -35,6 +35,7 @@ class GupyPaginationTests(unittest.TestCase):
                 self.assertEqual(sleep.call_count, len(responses) - 1)
                 if jobs:
                     self.assertEqual(jobs[0]["tipo_contrato"], "vacancy_type_effective")
+                    self.assertEqual(jobs[0]["descricao"], "Descrição da vaga")
 
     def test_failure_keeps_previous_pages_and_continues_next_keyword(self):
         responses = [page(100, 200), collect.requests.RequestException("falha"), page(1, 1), page(0, 1)]

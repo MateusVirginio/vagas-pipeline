@@ -89,6 +89,7 @@ def _fetch_gupy(session) -> list[dict]:
                     all_jobs.append({
                         "id": f"gupy_{job.get('id')}",
                         "nome": job.get("name"),
+                        "descricao": job.get("description"),
                         "empresa": job.get("careerPageName"),
                         "cidade": job.get("city"),
                         "estado": job.get("state"),
@@ -149,11 +150,14 @@ def save_to_postgres(jobs):
                     )
                 """)
 
+                cur.execute("ALTER TABLE vagas_raw ADD COLUMN IF NOT EXISTS descricao TEXT")
+
                 rows = [
                     (
                         job.get("id"), job.get("nome"), job.get("empresa"),
                         job.get("cidade"), job.get("estado"), job.get("tipo_contrato"),
                         job.get("regime"), job.get("publicado_em"), job.get("url"), job.get("fonte"),
+                        job.get("descricao"),
                     )
                     for job in jobs
                 ]
@@ -165,7 +169,7 @@ def save_to_postgres(jobs):
                     """
                     INSERT INTO vagas_raw
                         (id, nome, empresa, cidade, estado, tipo_contrato,
-                         regime, publicado_em, url, fonte)
+                         regime, publicado_em, url, fonte, descricao)
                     VALUES %s
                     ON CONFLICT (id) DO NOTHING
                     RETURNING id
