@@ -1,7 +1,7 @@
 # 📊 Vagas Pipeline — Mercado de Dados no Brasil
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)
-![Apache Airflow](https://img.shields.io/badge/Apache%20Airflow-2.9.2-017CEE?logo=apacheairflow)
+![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-diário-2088FF?logo=githubactions)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?logo=postgresql)
 ![dbt](https://img.shields.io/badge/dbt-1.11-FF694B?logo=dbt)
 ![Streamlit](https://img.shields.io/badge/Streamlit-online-FF4B4B?logo=streamlit)
@@ -27,7 +27,7 @@ O mercado de dados no Brasil cresce rapidamente, mas é difícil ter uma visão 
         └────────┬───────┘
                  ▼
         ┌────────────────┐
-        │ Python+Airflow │  Orquestração diária
+        │ Script Python  │  Agendado com GitHub Actions
         └────────┬───────┘
                  ▼
         ┌────────────────┐
@@ -49,11 +49,8 @@ O mercado de dados no Brasil cresce rapidamente, mas é difícil ter uma visão 
         └────────────────┘
 ```
 
-O script coleta e grava na mesma execução. A DAG existente chama esse script em uma única task:
-
-```
-coletar_e_salvar
-```
+O workflow coleta e grava no Neon, depois executa `dbt run`. Se a coleta falhar,
+a transformação não é executada.
 
 ---
 
@@ -61,7 +58,7 @@ coletar_e_salvar
 
 | Camada | Tecnologia | Função |
 |---|---|---|
-| Orquestração | Apache Airflow 2.9 | Agendamento e monitoramento do pipeline |
+| Agendamento | GitHub Actions | Execução diária e disparo manual com logs |
 | Coleta | Python + Requests | API Gupy |
 | Armazenamento | PostgreSQL 15 | Persistência das vagas coletadas |
 | Transformação | dbt 1.11 | Camadas Silver e Gold (arquitetura Medallion) |
@@ -76,11 +73,12 @@ coletar_e_salvar
 
 ```
 vagas-pipeline/
-├── dags/
-│   └── pipeline_vagas.py        # DAG do Airflow com @task decorator
+├── .github/workflows/
+│   └── coleta-diaria.yml        # Agendamento diário e disparo manual
 ├── src/
 │   ├── __init__.py
-│   └── collect.py               # Extract (Gupy) e Load
+│   ├── collect.py               # Extract (Gupy) e Load
+│   └── run_dbt.py               # dbt com credenciais de ambiente
 ├── dbt/
 │   └── vagas/
 │       └── models/
@@ -102,42 +100,72 @@ vagas-pipeline/
 
 ## 🚀 Como rodar localmente
 
-### Pré-requisitos
-- Docker e Docker Compose
-- UV (`pip install uv`)
+### Ambiente local
 
-### 1. Clone o repositório
-```bash
-git clone https://github.com/mateusvirginio/vagas-pipeline.git
-cd vagas-pipeline
-```
+Instale Python 3.12 e UV. Na raiz do repositório:
 
-### 2. Configure o ambiente
 ```bash
-echo "AIRFLOW_UID=$(id -u)" > .env
 uv sync
-source .venv/bin/activate
 ```
 
-### 3. Sobe o Airflow
+Configure `WAREHOUSE_DATABASE_URL` no `.env` com a URL do Neon (incluindo
+`sslmode=require`). O arquivo não deve ser versionado.
+
+Para desenvolver em um banco local opcional:
+
 ```bash
-docker compose up airflow-init
-docker compose up -d
+docker compose up -d postgres
+# No .env, use WAREHOUSE_DATABASE_URL=postgresql://vagas:vagas@localhost:5432/vagas?sslmode=disable
 ```
 
-Acesse http://localhost:8080 — usuário e senha: `airflow`
+Execute a coleta, as transformações e o dashboard:
 
-### 4. Rode as transformações dbt
 ```bash
-cd dbt/vagas
-dbt run
+uv run python src/collect.py
+uv run python src/run_dbt.py
+uv run streamlit run streamlit/app.py
 ```
 
-### 5. Sobe o dashboard
+O dashboard lê `DATABASE_URL` de `streamlit/.streamlit/secrets.toml`; configure a
+mesma base escolhida para a coleta. O perfil versionado em `dbt/vagas/profiles.yml`
+usa `env_var` para `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` e
+`PGSSLMODE`. `run_dbt.py` extrai essas variáveis da URL sem imprimir credenciais
+nem gravá-las em arquivos.
+
+### Agendamento diário no GitHub Actions
+
+O workflow `.github/workflows/coleta-diaria.yml` roda todo dia às **06:17 de São
+Paulo (09:17 UTC)** e também por `workflow_dispatch`. Execuções agendadas podem
+atrasar; o arquivo precisa estar na branch padrão do repositório.
+
+Em Settings → Secrets and variables → Actions, configure o Secret
+`WAREHOUSE_DATABASE_URL` com a URL do Neon. Nunca coloque essa URL no YAML.
+Para disparar e acompanhar uma execução manual:
+
 ```bash
-cd ../..
-streamlit run streamlit/app.py
+gh workflow run coleta-diaria.yml
+gh run list --workflow coleta-diaria.yml
+gh run view ID_DA_EXECUCAO --log
 ```
+
+Escolhemos Actions porque há apenas um script diário seguido de dbt: ele oferece
+agendamento, logs e Secrets sem manter servidor, scheduler, workers ou Redis.
+Airflow acrescentava infraestrutura e exigia que a máquina local ficasse ligada.
+O Compose agora contém somente um Postgres opcional para desenvolvimento, com
+volume próprio (`vagas-db-volume`), preservando os volumes antigos.
+
+Para concluir o aceite, acompanhe **três dias consecutivos** com evento `schedule`
+e status de sucesso no Actions e confira a carga no Neon:
+
+```sql
+SELECT coletado_em::date AS dia, count(*) AS vagas_novas
+FROM vagas_raw
+GROUP BY 1 ORDER BY 1 DESC;
+```
+
+Uma execução bem-sucedida pode inserir zero registros se todas as vagas já
+existirem; compare essa consulta com o log de coleta e inserção de cada execução.
+Não usamos reset no workflow diário.
 
 ---
 
@@ -173,7 +201,7 @@ permitindo atualizar bancos existentes. Registros já existentes não são
 atualizados pela carga (`ON CONFLICT DO NOTHING`).
 
 Após o reset inicial com `TRUNCATE vagas_raw`, execute a coleta e depois
-`dbt run --project-dir dbt/vagas` para atualizar as visões usadas pelo dashboard.
+`uv run python src/run_dbt.py` para atualizar as visões usadas pelo dashboard.
 O reset é uma operação manual; executar o coletor normalmente preserva as vagas
 já armazenadas. A ausência de uma vaga na coleta não a marca como fechada.
 
@@ -201,7 +229,7 @@ uv run python -m unittest discover -s tests
 ```
 
 Para verificar a carga, compare `SELECT count(*) FROM vagas_raw;` antes e depois
-de executar a DAG. A contagem só aumenta se houver IDs novos, pois a carga usa
+de executar o script. A contagem só aumenta se houver IDs novos, pois a carga usa
 `ON CONFLICT (id) DO NOTHING`.
 
 ## 🗄️ Modelos dbt

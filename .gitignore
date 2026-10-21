@@ -1,4 +1,4 @@
-# Airflow
+# Logs e cache Python
 logs/
 *.pyc
 __pycache__/
