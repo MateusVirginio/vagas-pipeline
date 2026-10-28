@@ -43,7 +43,9 @@ cleaned as (
         end as regime_trabalho,
 
         fonte,
-        coletado_em::date as data_coleta
+        coletado_em::date as data_coleta,
+        {{ classificar_area("nome") }} as area,
+        ultima_coleta
 
     from source
     where id is not null

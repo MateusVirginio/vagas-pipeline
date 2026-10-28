@@ -32,6 +32,7 @@ class InsertCountTests(unittest.TestCase):
                         url text, fonte text, coletado_em timestamp DEFAULT NOW()
                     )
                 """)
+                cur.execute("INSERT INTO vagas_raw (id) VALUES ('legado')")
             jobs = [{"id": f"teste_{i}", "nome": "Vaga de teste", "fonte": "gupy", "descricao": "Descrição de teste"} for i in range(250)]
             with patch.object(collect.psycopg2, "connect", return_value=conn), \
                     patch.object(collect, "closing", side_effect=nullcontext):
@@ -47,10 +48,30 @@ class InsertCountTests(unittest.TestCase):
                     with conn.cursor() as cur:
                         cur.execute("SELECT count(*) FROM vagas_raw WHERE descricao = 'Descrição de teste'")
                         self.assertEqual(cur.fetchone()[0], 250)
+                        cur.execute("SELECT ultima_coleta FROM vagas_raw WHERE id = 'legado'")
+                        legacy_seen = cur.fetchone()[0]
+                        if expected == 250:
+                            self.assertIsNone(legacy_seen)
+                        else:
+                            self.assertEqual(legacy_seen, stale_seen)
+                        cur.execute("SELECT coletado_em, ultima_coleta FROM vagas_raw WHERE id = 'teste_0'")
+                        first_seen, last_seen = cur.fetchone()
+                        self.assertIsNotNone(last_seen)
+                        if expected == 250:
+                            original_first_seen = first_seen
+                            cur.execute("UPDATE vagas_raw SET ultima_coleta = NOW() - INTERVAL '10 days' WHERE id IN ('teste_0', 'legado')")
+                            cur.execute("SELECT ultima_coleta FROM vagas_raw WHERE id = 'teste_0'")
+                            stale_seen = cur.fetchone()[0]
+                        else:
+                            self.assertEqual(first_seen, original_first_seen)
+                            self.assertGreater(last_seen, stale_seen)
                     logged = int(logs.output[-1].split(":", 2)[-1].split()[0])
                     self.assertEqual(logged, after - before)
                     self.assertEqual(logged, expected)
                     print(f"Carga corrigida: log={logged}, diferença de count(*)={after - before}")
+                    if expected == 250:
+                        # Um registro ausente da próxima coleta deve manter sua data.
+                        conn.commit()
 
 
 if __name__ == "__main__":

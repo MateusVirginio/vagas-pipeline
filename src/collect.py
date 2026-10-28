@@ -35,6 +35,20 @@ KEYWORDS = [
     "data quality",
     "arquiteto de dados",
     "data architect",
+    "machine learning",
+    "engenheiro de machine learning",
+    "machine learning engineer",
+    "engenheiro de IA",
+    "AI engineer",
+    "AI engineering",
+    "inteligência artificial",
+    "artificial intelligence",
+    "MLOps",
+    "LLMOps",
+    "generative AI",
+    "IA generativa",
+    "GenAI",
+    "aprendizado de máquina",
 ]
 
 HEADERS = {
@@ -151,6 +165,15 @@ def save_to_postgres(jobs):
                 """)
 
                 cur.execute("ALTER TABLE vagas_raw ADD COLUMN IF NOT EXISTS descricao TEXT")
+                # Registros antigos ficam NULL até serem vistos em uma nova coleta.
+                cur.execute("ALTER TABLE vagas_raw ADD COLUMN IF NOT EXISTS ultima_coleta TIMESTAMPTZ")
+                cur.execute("ALTER TABLE vagas_raw ALTER COLUMN ultima_coleta SET DEFAULT NOW()")
+
+                # O bloqueio serializa cargas para a diferença de count(*) ser exata.
+                # Com DO UPDATE, contar os IDs retornados também contaria as revisitas.
+                cur.execute("LOCK TABLE vagas_raw IN SHARE ROW EXCLUSIVE MODE")
+                cur.execute("SELECT count(*) FROM vagas_raw")
+                before_count = cur.fetchone()[0]
 
                 rows = [
                     (
@@ -162,24 +185,22 @@ def save_to_postgres(jobs):
                     for job in jobs
                 ]
 
-                # RETURNING id com fetch=True reúne as inserções de todos os lotes.
-                # Assim contamos só IDs novos; rowcount considera apenas o último lote.
-                inserted_rows = execute_values(
+                execute_values(
                     cur,
                     """
                     INSERT INTO vagas_raw
                         (id, nome, empresa, cidade, estado, tipo_contrato,
                          regime, publicado_em, url, fonte, descricao)
                     VALUES %s
-                    ON CONFLICT (id) DO NOTHING
-                    RETURNING id
+                    ON CONFLICT (id) DO UPDATE
+                        SET ultima_coleta = EXCLUDED.ultima_coleta
                     """,
                     rows,
-                    fetch=True,
                 )
 
-                inserted = len(inserted_rows)
-    logger.info(f"{inserted} novas vagas inseridas | {len(rows) - inserted} já existiam.")
+                cur.execute("SELECT count(*) FROM vagas_raw")
+                inserted = cur.fetchone()[0] - before_count
+    logger.info(f"{inserted} novas vagas inseridas | {len(rows) - inserted} vagas revisitadas.")
 
 
 if __name__ == "__main__":

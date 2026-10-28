@@ -7,7 +7,7 @@ import plotly.express as px
 import psycopg2
 import streamlit as st
 
-st.set_page_config(page_title="Radar de Dados · Mercado de trabalho", page_icon="◈", layout="wide")
+st.set_page_config(page_title="Radar de Dados e IA · Mercado de trabalho", page_icon="◈", layout="wide")
 
 st.markdown("""
 <style>
@@ -67,19 +67,20 @@ def chart_style(fig, height=360):
 df_estado = load_data("select * from vagas_por_estado")
 df_senioridade = load_data("select * from vagas_por_senioridade")
 df_empresa = load_data("select * from vagas_por_empresa")
-df_vagas = load_data("select cargo, empresa, cidade, estado, senioridade, regime_trabalho, data_coleta from stg_vagas")
+df_area = load_data("select * from vagas_por_area")
+df_vagas = load_data("select cargo, empresa, cidade, estado, senioridade, regime_trabalho, data_coleta, area from stg_vagas")
 total = len(df_vagas)
 last_date = pd.to_datetime(df_vagas["data_coleta"]).max() if total else pd.NaT
 updated = last_date.strftime("%d.%m.%Y") if pd.notna(last_date) else "Sem dados"
 
 brand, freshness = st.columns([3, 2])
 with brand:
-    st.markdown('<div class="brand"><span class="brand-icon">◈</span> RADAR DE DADOS</div>', unsafe_allow_html=True)
+    st.markdown('<div class="brand"><span class="brand-icon">◈</span> RADAR DE DADOS E IA</div>', unsafe_allow_html=True)
 with freshness:
     st.caption(f"Gupy · Coleta diária · Última inclusão: {updated}")
 st.markdown('<div class="eyebrow">OBSERVATÓRIO DO MERCADO DE TRABALHO</div>', unsafe_allow_html=True)
-st.markdown("<h1>Seu próximo passo<br>começa nos dados.</h1>", unsafe_allow_html=True)
-st.markdown('<p class="hero-copy">Um retrato das oportunidades em dados no Brasil. Explore onde estão as vagas, quem contrata e quais perfis o mercado procura.</p>', unsafe_allow_html=True)
+st.markdown("<h1>Seu próximo passo<br>começa em dados e IA.</h1>", unsafe_allow_html=True)
+st.markdown('<p class="hero-copy">Um retrato das oportunidades em dados e inteligência artificial no Brasil. Explore onde estão as vagas, quem contrata e quais perfis o mercado procura.</p>', unsafe_allow_html=True)
 
 metrics = st.columns(4)
 metrics[0].metric("Vagas na base", number(total))
@@ -97,6 +98,12 @@ else:
 
 overview, explore = st.tabs(["Panorama do mercado", "Explorar oportunidades"])
 with overview:
+    with st.container(border=True):
+        st.subheader("Dados e IA em perspectiva")
+        st.caption("Distribuição por área, classificada pelo título da vaga")
+        fig = px.bar(df_area, x="total_vagas", y="area", orientation="h", text="total_vagas", color="area", color_discrete_sequence=PALETTE)
+        fig.update_traces(textposition="outside", marker_cornerradius=4)
+        st.plotly_chart(chart_style(fig, 290), width="stretch", config={"displayModeBar": False})
     left, right = st.columns([1.2, 1], gap="large")
     with left, st.container(border=True):
         st.subheader("Onde estão as oportunidades")
@@ -122,15 +129,16 @@ with explore:
     st.subheader("Encontre o seu recorte")
     st.caption("Busque por cargo ou empresa e combine os filtros para explorar a base.")
     search = st.text_input("Cargo ou empresa", placeholder="Ex.: engenheiro de dados, analytics, nome da empresa…")
-    f1, f2, f3 = st.columns(3)
+    f1, f2, f3, f4 = st.columns(4)
     seniority = f1.multiselect("Senioridade", sorted(df_vagas["senioridade"].dropna().unique()))
     workplace = f2.multiselect("Regime", sorted(df_vagas["regime_trabalho"].dropna().unique()))
     states = f3.multiselect("Estado", sorted(df_vagas["estado"].dropna().unique()))
+    areas = f4.multiselect("Área", sorted(df_vagas["area"].dropna().unique()))
     filtered = df_vagas.copy()
     if search.strip():
         query = search.strip()
         filtered = filtered[filtered["cargo"].str.contains(query, case=False, regex=False, na=False) | filtered["empresa"].str.contains(query, case=False, regex=False, na=False)]
-    for column, selection in [("senioridade", seniority), ("regime_trabalho", workplace), ("estado", states)]:
+    for column, selection in [("senioridade", seniority), ("regime_trabalho", workplace), ("estado", states), ("area", areas)]:
         if selection:
             filtered = filtered[filtered[column].isin(selection)]
     st.caption(f"{number(len(filtered))} oportunidades · {number(total)} vagas na base")
@@ -141,11 +149,11 @@ with explore:
             filtered.sort_values("data_coleta", ascending=False), hide_index=True, width="stretch", height=430,
             column_config={
                 "cargo": st.column_config.TextColumn("Cargo", width="large"),
-                "empresa": "Empresa", "cidade": "Cidade", "estado": "Estado",
+                "area": "Área", "empresa": "Empresa", "cidade": "Cidade", "estado": "Estado",
                 "senioridade": "Senioridade", "regime_trabalho": "Regime",
                 "data_coleta": st.column_config.DateColumn("Incluída em", format="DD/MM/YYYY"),
             },
         )
     st.download_button("Baixar este recorte · CSV", filtered.to_csv(index=False).encode("utf-8-sig"), "radar-de-dados.csv", "text/csv")
 
-st.markdown('<div class="footer">RADAR DE DADOS &nbsp; / &nbsp; Fonte: Gupy · Atualização diária · Dados em cache por até 1 hora.<br>Os números refletem vagas coletadas. A disponibilidade atual deve ser confirmada na Gupy.</div>', unsafe_allow_html=True)
+st.markdown('<div class="footer">RADAR DE DADOS E IA &nbsp; / &nbsp; Fonte: Gupy · Atualização diária · Dados em cache por até 1 hora.<br>Os números refletem vagas coletadas. A disponibilidade atual deve ser confirmada na Gupy.</div>', unsafe_allow_html=True)
