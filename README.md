@@ -99,8 +99,9 @@ vagas-pipeline/
 │   ├── embedding_text.py        # Normalização, composição, tokens e hash
 │   ├── embedding_batches.py     # Lotes por quantidade e tokens
 │   ├── gerar_embeddings.py      # Diagnóstico e geração incremental
-│   ├── gerar_primeiro_embedding.py # Exemplo didático de uma vaga
 │   └── limpar_embeddings.py     # Retenção dos embeddings
+├── examples/
+│   └── gerar_primeiro_embedding.py # Exemplo didático de uma vaga
 ├── sql/
 │   └── 001_criar_vagas_embeddings.sql # Extensão vector e tabela
 ├── dbt/
@@ -117,7 +118,9 @@ vagas-pipeline/
 ├── streamlit/
 │   └── app.py                   # Dashboard interativo
 ├── docker-compose.yaml
+├── .env.example                # Variáveis de ambiente, sem credenciais
 ├── pyproject.toml
+├── uv.lock                     # Versões resolvidas das dependências
 └── .gitignore
 ```
 
@@ -130,17 +133,44 @@ vagas-pipeline/
 Instale Python 3.12 e UV. Na raiz do repositório:
 
 ```bash
-uv sync
+uv sync --locked
 ```
 
-Configure `WAREHOUSE_DATABASE_URL` no `.env` com a URL do Neon (incluindo
-`sslmode=require`). O arquivo não deve ser versionado.
+O `uv.lock` é versionado. `--locked` verifica se ele corresponde ao
+`pyproject.toml` e falha se houver divergência, em vez de resolver novas versões.
+Ao adicionar uma dependência com `uv add`, versione os dois arquivos.
+
+Crie sua configuração local sem sobrescrever um `.env` existente:
+
+```bash
+cp -n .env.example .env
+```
+
+Preencha `WAREHOUSE_DATABASE_URL` com a URL do Neon (incluindo
+`sslmode=require`) e `OPENAI_API_KEY` para gerar embeddings. O `.env` não deve
+ser versionado. `TEST_DATABASE_URL` é opcional e habilita testes de integração.
 
 Para desenvolver em um banco local opcional:
 
 ```bash
 docker compose up -d postgres
 # No .env, use WAREHOUSE_DATABASE_URL=postgresql://vagas:vagas@localhost:5432/vagas?sslmode=disable
+```
+
+O Compose usa PostgreSQL 15 com pgvector 0.8.7, mantendo o volume
+`vagas-db-volume`. A imagem fornece a extensão, que ainda precisa ser ativada
+em cada banco. Depois da primeira coleta, aplique a estrutura dos embeddings:
+
+```bash
+docker compose exec -T postgres psql -U vagas -d vagas -v ON_ERROR_STOP=1 \
+  < sql/001_criar_vagas_embeddings.sql
+```
+
+Para conferir a extensão instalada:
+
+```bash
+docker compose exec -T postgres psql -U vagas -d vagas \
+  -c "SELECT extversion FROM pg_extension WHERE extname = 'vector';"
 ```
 
 Execute a coleta, as transformações e o dashboard:
@@ -156,6 +186,25 @@ mesma base escolhida para a coleta. O perfil versionado em `dbt/vagas/profiles.y
 usa `env_var` para `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` e
 `PGSSLMODE`. `run_dbt.py` extrai essas variáveis da URL sem imprimir credenciais
 nem gravá-las em arquivos.
+
+### Dev Container / Codespaces
+
+O `.devcontainer/devcontainer.json` usa Python 3.12, instala UV e executa
+`uv sync --locked` na criação. O editor seleciona `.venv/bin/python`.
+Configure o banco e os Secrets locais conforme descrito acima; o servidor é
+iniciado manualmente depois dessa configuração:
+
+```bash
+python -m uv run --locked streamlit run streamlit/app.py \
+  --server.address 0.0.0.0
+```
+
+A porta 8501 é encaminhada pelo Dev Container. O Compose é uma opção separada
+para quem tem Docker disponível; dentro de um container, `localhost` identifica
+o próprio container. Para Codespaces, a conexão com o Neon pode ser configurada
+diretamente. `streamlit/requirements.txt` permanece como manifesto específico
+do deploy no Streamlit; o desenvolvimento e o Actions usam `pyproject.toml` e
+`uv.lock`.
 
 ### Agendamento diário no GitHub Actions
 
@@ -182,7 +231,8 @@ O job tem limite de **60 minutos** e executa:
 4. Limpeza dos embeddings com última observação conhecida anterior a 60 dias.
 
 Os arquivos Python novos, o SQL e o `pyproject.toml` precisam estar versionados
-na branch usada pelo workflow. A execução completa local inicial levou cerca de
+na branch usada pelo workflow, junto com `uv.lock`. A instalação usa
+`uv sync --locked`. A execução completa local inicial levou cerca de
 25 minutos para os 25 lotes restantes; a duração diária depende das pendências.
 
 Para disparar e acompanhar uma execução manual:
@@ -334,7 +384,7 @@ ser revista com exemplos reais que ultrapassem o teto.
 
 ### Preparação e comandos locais
 
-Após `uv sync`, configure `WAREHOUSE_DATABASE_URL` e `OPENAI_API_KEY` no `.env`,
+Após `uv sync --locked`, configure `WAREHOUSE_DATABASE_URL` e `OPENAI_API_KEY` no `.env`,
 sem versionar seus valores. Os scripts de embeddings carregam esse arquivo com
 `override=True`: localmente, ele tem prioridade sobre variáveis já definidas.
 No Actions, sem esse arquivo, são usados os Secrets do ambiente.
@@ -342,6 +392,11 @@ No Actions, sem esse arquivo, são usados os Secrets do ambiente.
 Em uma base nova, execute a coleta para criar `vagas_raw` e aplique o conteúdo de
 `sql/001_criar_vagas_embeddings.sql` no SQL Editor do Neon. Essa preparação ativa
 a extensão `vector` e cria a tabela; ainda não gera vetores.
+
+O exemplo didático de uma vaga está em `examples/`, separado da rotina diária.
+Para executá-lo da raiz, use `uv run python -m examples.gerar_primeiro_embedding`.
+Esse exemplo pode chamar a API e gravar um embedding; para uso diário, prefira
+`src.gerar_embeddings`, que aplica a seleção por última observação.
 
 ```bash
 # Diagnóstico: consulta o banco e conta tokens, sem chamar a API de embeddings.

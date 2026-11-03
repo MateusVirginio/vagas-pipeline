@@ -1,3 +1,5 @@
+"""Exemplo didático: python -m examples.gerar_primeiro_embedding."""
+
 import json
 import os
 from contextlib import closing

@@ -13,7 +13,6 @@ data/
 # Python
 *.egg-info/
 .uv/
-uv.lock
 main.py
 
 # OS
