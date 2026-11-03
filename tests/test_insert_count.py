@@ -59,6 +59,10 @@ class InsertCountTests(unittest.TestCase):
                         self.assertIsNotNone(last_seen)
                         if expected == 250:
                             original_first_seen = first_seen
+                            cur.execute(
+                                """
+                                UPDATE vagas_raw SET descricao = 'Descrição antiga' WHERE id = 'teste_0'
+                                """)
                             cur.execute("UPDATE vagas_raw SET ultima_coleta = NOW() - INTERVAL '10 days' WHERE id IN ('teste_0', 'legado')")
                             cur.execute("SELECT ultima_coleta FROM vagas_raw WHERE id = 'teste_0'")
                             stale_seen = cur.fetchone()[0]

@@ -15,9 +15,10 @@ concurrency:
 jobs:
   coletar-e-transformar:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       WAREHOUSE_DATABASE_URL: ${{ secrets.WAREHOUSE_DATABASE_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,7 +31,16 @@ jobs:
       - name: Validar configuração
         run: |
           test -n "$WAREHOUSE_DATABASE_URL" || { echo 'Secret WAREHOUSE_DATABASE_URL ausente'; exit 1; }
+          test -n "$OPENAI_API_KEY" || { echo 'Secret OPENAI_API_KEY ausente'; exit 1; }
       - name: Coletar e carregar no Neon
         run: uv run python src/collect.py
       - name: Executar dbt run
         run: uv run python src/run_dbt.py
+      - name: Gerar embeddings novos ou alterados
+        run: >
+          uv run python -m src.gerar_embeddings
+          --executar
+          --variacao titulo_empresa_descricao
+          --intervalo 60
+      - name: Limpar embeddings antigos
+        run: uv run python -m src.limpar_embeddings --executar

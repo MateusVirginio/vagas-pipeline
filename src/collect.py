@@ -193,7 +193,18 @@ def save_to_postgres(jobs):
                          regime, publicado_em, url, fonte, descricao)
                     VALUES %s
                     ON CONFLICT (id) DO UPDATE
-                        SET ultima_coleta = EXCLUDED.ultima_coleta
+                        SET
+                            nome = EXCLUDED.nome,
+                            empresa = EXCLUDED.empresa,
+                            cidade = EXCLUDED.cidade,
+                            estado = EXCLUDED.estado,
+                            tipo_contrato = EXCLUDED.tipo_contrato,
+                            regime = EXCLUDED.regime,
+                            publicado_em = EXCLUDED.publicado_em,
+                            url = EXCLUDED.url,
+                            fonte = EXCLUDED.fonte,
+                            descricao = EXCLUDED.descricao,
+                            ultima_coleta = EXCLUDED.ultima_coleta
                     """,
                     rows,
                 )

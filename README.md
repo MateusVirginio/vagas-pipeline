@@ -50,8 +50,22 @@ O mercado de dados no Brasil cresce rapidamente, mas é difícil ter uma visão 
         └────────────────┘
 ```
 
-O workflow coleta e grava no Neon, depois executa `dbt run`. Se a coleta falhar,
-a transformação não é executada.
+O workflow coleta e grava no Neon, executa `dbt run`, gera embeddings novos ou
+alterados e limpa embeddings antigos. As etapas são sequenciais: uma falha
+interrompe as etapas posteriores.
+
+O caminho dos embeddings parte de `vagas_raw`:
+
+```text
+vagas_raw → preparar texto → validar tokens → comparar hash
+                                               ↓ quando necessário
+                                    OpenAI Embeddings API
+                                               ↓
+                                vagas_embeddings (pgvector)
+```
+
+A geração incremental está implementada. A consulta por similaridade e sua
+integração com um assistente ainda estão em desenvolvimento.
 
 ---
 
@@ -62,6 +76,8 @@ a transformação não é executada.
 | Agendamento | GitHub Actions | Execução diária e disparo manual com logs |
 | Coleta | Python + Requests | API Gupy |
 | Armazenamento | PostgreSQL 15 | Persistência das vagas coletadas |
+| Embeddings | OpenAI + tiktoken | Vetores de texto e contagem local de tokens |
+| Armazenamento vetorial | pgvector no Neon | Persistência dos embeddings por vaga, variação e modelo |
 | Transformação | dbt 1.11 | Camadas Silver e Gold (arquitetura Medallion) |
 | Visualização | Streamlit + Plotly | Dashboard interativo publicado online |
 | Banco na nuvem | Neon (PostgreSQL serverless) | Banco de produção para o dashboard |
@@ -79,7 +95,14 @@ vagas-pipeline/
 ├── src/
 │   ├── __init__.py
 │   ├── collect.py               # Extract (Gupy) e Load
-│   └── run_dbt.py               # dbt com credenciais de ambiente
+│   ├── run_dbt.py               # dbt com credenciais de ambiente
+│   ├── embedding_text.py        # Normalização, composição, tokens e hash
+│   ├── embedding_batches.py     # Lotes por quantidade e tokens
+│   ├── gerar_embeddings.py      # Diagnóstico e geração incremental
+│   ├── gerar_primeiro_embedding.py # Exemplo didático de uma vaga
+│   └── limpar_embeddings.py     # Retenção dos embeddings
+├── sql/
+│   └── 001_criar_vagas_embeddings.sql # Extensão vector e tabela
 ├── dbt/
 │   └── vagas/
 │       └── models/
@@ -140,8 +163,28 @@ O workflow `.github/workflows/coleta-diaria.yml` roda todo dia às **06:17 de S�
 Paulo (09:17 UTC)** e também por `workflow_dispatch`. Execuções agendadas podem
 atrasar; o arquivo precisa estar na branch padrão do repositório.
 
-Em Settings → Secrets and variables → Actions, configure o Secret
-`WAREHOUSE_DATABASE_URL` com a URL do Neon. Nunca coloque essa URL no YAML.
+Em Settings → Secrets and variables → Actions, configure os Secrets:
+
+- `WAREHOUSE_DATABASE_URL`: URL do Neon com `sslmode=require`.
+- `OPENAI_API_KEY`: chave da API usada para gerar os embeddings.
+
+O YAML referencia esses Secrets; os valores não devem ser versionados. O runner
+não precisa do `.env`. Antes da primeira execução em uma base nova, aplique
+`sql/001_criar_vagas_embeddings.sql` no banco, depois de criar `vagas_raw` pela
+coleta. O workflow valida a presença das duas variáveis antes da coleta.
+
+O job tem limite de **60 minutos** e executa:
+
+1. Coleta e carga no Neon.
+2. Transformação com dbt.
+3. Geração incremental de `titulo_empresa_descricao`, com intervalo de 60 segundos
+   entre lotes.
+4. Limpeza dos embeddings com última observação conhecida anterior a 60 dias.
+
+Os arquivos Python novos, o SQL e o `pyproject.toml` precisam estar versionados
+na branch usada pelo workflow. A execução completa local inicial levou cerca de
+25 minutos para os 25 lotes restantes; a duração diária depende das pendências.
+
 Para disparar e acompanhar uma execução manual:
 
 ```bash
@@ -150,7 +193,7 @@ gh run list --workflow coleta-diaria.yml
 gh run view ID_DA_EXECUCAO --log
 ```
 
-Escolhemos Actions porque há apenas um script diário seguido de dbt: ele oferece
+Escolhemos Actions para orquestrar esta sequência diária: ele oferece
 agendamento, logs e Secrets sem manter servidor, scheduler, workers ou Redis.
 Airflow acrescentava infraestrutura e exigia que a máquina local ficasse ligada.
 O Compose agora contém somente um Postgres opcional para desenvolvimento, com
@@ -199,13 +242,14 @@ echo $?
 retornado na própria listagem da Gupy, sem chamada extra de detalhe. O texto é
 preservado como recebido para extração de skills e busca semântica. A carga
 adiciona a coluna automaticamente com `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`,
-permitindo atualizar bancos existentes. Em registros existentes, `ON CONFLICT DO UPDATE` atualiza apenas
-`ultima_coleta`, preservando os demais campos e a data de primeira inclusão.
+permitindo atualizar bancos existentes. Em registros existentes, `ON CONFLICT
+DO UPDATE` atualiza os dados recebidos da vaga, incluindo título, descrição e
+link, e avança `ultima_coleta`. `coletado_em`, a data de primeira inclusão, é
+preservado. Campos vazios recebidos também substituem os valores anteriores.
 
-Após o reset inicial com `TRUNCATE vagas_raw`, execute a coleta e depois
-`uv run python src/run_dbt.py` para atualizar as visões usadas pelo dashboard.
-O reset é uma operação manual; executar o coletor normalmente preserva as vagas
-já armazenadas. A ausência de uma vaga na coleta não a marca como fechada.
+Execute a coleta e depois `uv run python src/run_dbt.py` para atualizar as visões
+usadas pelo dashboard. A rotina diária usa upsert e preserva as vagas já
+armazenadas, sem reset. A ausência de uma vaga na coleta não a marca como fechada.
 
 ### Última vez que a vaga foi vista
 
@@ -258,8 +302,160 @@ uv run python -m unittest discover -s tests
 ```
 
 Para verificar a carga, compare `SELECT count(*) FROM vagas_raw;` antes e depois
-de executar o script. A contagem só aumenta se houver IDs novos, pois a carga usa
-`ON CONFLICT (id) DO UPDATE` altera somente `ultima_coleta` nas revisitas.
+de executar o script. A contagem só aumenta se houver IDs novos. Nas revisitas,
+`ON CONFLICT (id) DO UPDATE` atualiza os dados e `ultima_coleta` sem criar outra
+linha nem alterar a data de primeira inclusão.
+
+## 🧠 Embeddings das vagas — issue 7 em andamento
+
+### Texto e configuração
+
+Usamos `text-embedding-3-small`, com 1.536 dimensões e tokenização `cl100k_base`.
+Cada vaga pode ter um vetor por variação e modelo; a chave primária é
+`(vaga_id, variacao, modelo)`. A coluna `VECTOR(1536)` fixa a dimensão: mudar a
+dimensão exige adaptar a estrutura, além de gerar novos vetores.
+
+As variações disponíveis são `titulo` e `titulo_empresa_descricao`. A rotina
+diária usa a segunda. A comparação com 20 consultas e a taxa de acerto no top 5
+ainda estão pendentes; a escolha definitiva será feita após essa avaliação.
+
+Antes da geração, entidades como `&amp;` e `&nbsp;` são decodificadas, os espaços
+são normalizados e os campos são montados em ordem fixa. Essa normalização não
+remove tags HTML. Campos opcionais vazios são omitidos; título vazio é inválido.
+O SHA-256 é calculado sobre o texto preparado, exatamente como enviado ao modelo.
+Mesmo texto, modelo e variação permitem reutilizar o vetor; alterações no texto
+ou uma nova configuração exigem geração.
+
+O teto é de **8.000 tokens por entrada**, sem corte automático. Entradas acima
+dele são registradas como inválidas e ficam fora da geração; a execução continua
+com as demais. No diagnóstico inicial de 578 vagas, a maior entrada completa
+tinha 2.264 tokens, permitindo preservar as descrições inteiras. A política pode
+ser revista com exemplos reais que ultrapassem o teto.
+
+### Preparação e comandos locais
+
+Após `uv sync`, configure `WAREHOUSE_DATABASE_URL` e `OPENAI_API_KEY` no `.env`,
+sem versionar seus valores. Os scripts de embeddings carregam esse arquivo com
+`override=True`: localmente, ele tem prioridade sobre variáveis já definidas.
+No Actions, sem esse arquivo, são usados os Secrets do ambiente.
+
+Em uma base nova, execute a coleta para criar `vagas_raw` e aplique o conteúdo de
+`sql/001_criar_vagas_embeddings.sql` no SQL Editor do Neon. Essa preparação ativa
+a extensão `vector` e cria a tabela; ainda não gera vetores.
+
+```bash
+# Diagnóstico: consulta o banco e conta tokens, sem chamar a API de embeddings.
+uv run python -m src.gerar_embeddings
+uv run python -m src.gerar_embeddings --max-lotes 1
+
+# Execução: chama a API e grava os vetores; gera cobrança de uso.
+uv run python -m src.gerar_embeddings --executar --max-lotes 1
+uv run python -m src.gerar_embeddings --executar --intervalo 60
+
+# Variação de título para a avaliação comparativa.
+uv run python -m src.gerar_embeddings --variacao titulo
+uv run python -m src.gerar_embeddings --executar --variacao titulo
+```
+
+São elegíveis apenas vagas com `ultima_coleta >= NOW() - INTERVAL '60 days'`.
+Cada lote contém até **20 entradas** e **20.000 tokens**. O SDK permite até três
+repetições além da tentativa inicial para falhas elegíveis. O intervalo padrão
+de 60 segundos entre lotes é um ritmo inicial; os limites efetivos dependem da
+conta e de outras chamadas simultâneas.
+
+Os vetores são associados às entradas pelo `index` da resposta. Cada lote é
+gravado em sua própria transação com upsert. Falhas na geração ou persistência
+interrompem o processamento; os lotes já confirmados permanecem salvos e são
+reconhecidos pelo hash na próxima execução. Isso não constitui uma garantia de
+cobrança única: uma resposta perdida ou falha de persistência após a geração
+pode exigir outra chamada.
+
+Os logs registram modelo, variação, quantidade, tokens da resposta, custo
+estimado e duração. O preço configurado é US$ 0,02 por milhão de tokens para o
+modelo escolhido; deve ser revisto se o modelo ou a tarifa mudar. O consumo é
+registrado antes da persistência, pois o rollback do banco não desfaz a API.
+
+### Medições da geração inicial
+
+Resultados observados localmente em **03/11/2026**, para a variação completa:
+
+| Medida | Resultado |
+|---|---:|
+| Vagas elegíveis com embeddings atualizados | 538 |
+| Pendências e entradas inválidas ao final | 0 |
+| Tokens, somando os lotes dessas 538 vagas | 512.574 |
+| Custo estimado desses lotes | US$ 0,01025148 |
+| Embeddings totais armazenados | 539 |
+
+O registro adicional veio do exercício inicial com uma vaga cuja
+`ultima_coleta` era nula. Os custos acima não incluem esse exercício nem o texto
+fictício usado para experimentar a API. Reexecutar o diagnóstico após a carga
+reconheceu as 538 entradas atualizadas e não exigiu novas chamadas.
+
+| Armazenamento | Antes | Depois |
+|---|---:|---:|
+| Banco inteiro, em bytes | 10.797.056 | 15.458.304 |
+| Tabela de embeddings, incluindo índices e estruturas auxiliares, em bytes | 49.152 | 4.710.400 |
+| Quantidade de embeddings | 1 | 539 |
+
+O crescimento foi de **4.661.248 bytes** tanto no banco quanto na tabela nesse
+intervalo. Dividido pelos 538 novos embeddings, representa **0,008664 MB por
+embedding adicionado**. A média total da tabela foi de **0,008739 MB por
+embedding**, incluindo espaço alocado. Usamos MB decimal: 1 MB = 1.000.000 bytes.
+Como há uma variação por vaga nesta medição, esse é também o espaço médio dos
+embeddings por vaga. Manter duas variações acrescentará outro vetor por vaga;
+texto menor reduz tokens de geração, mas mantém as 1.536 dimensões.
+
+Para repetir a medição, registre esta consulta antes e depois de uma carga:
+
+```sql
+SELECT
+    NOW() AS medido_em,
+    pg_database_size(current_database()) AS banco_bytes,
+    pg_total_relation_size('public.vagas_embeddings') AS tabela_embeddings_bytes,
+    COUNT(*) AS total_embeddings,
+    COUNT(DISTINCT vaga_id) AS vagas_distintas
+FROM public.vagas_embeddings;
+```
+
+Isolando o crescimento dos embeddings e descontando o banco atual, um orçamento
+de 0,5 GB decimal comportaria aproximadamente 55.900 vetores adicionais. O Neon
+anuncia atualmente 1 GB por projeto no plano gratuito, o que daria cerca de
+113.600 vetores adicionais sob a mesma hipótese ([plano atual](https://neon.com/pricing),
+[mudança da cota](https://neon.com/blog/neon-free-plan-1-gb-per-project)). Essas
+projeções não incluem novas descrições, outros dados, índices futuros ou logs.
+A duração real ainda depende da medição do crescimento líquido diário do banco:
+`dias restantes ≈ MB disponíveis / crescimento líquido em MB por dia`.
+
+### Limpeza e retenção
+
+```bash
+# Apenas conta candidatos, sem excluir.
+uv run python -m src.limpar_embeddings
+
+# Remove embeddings com última observação conhecida anterior a 60 dias.
+uv run python -m src.limpar_embeddings --executar
+```
+
+A exclusão usa `DELETE ... USING vagas_raw` e afeta todas as variações e modelos
+da vaga antiga, preservando `vagas_raw`. Vagas vistas há exatamente 60 dias são
+preservadas pelo operador `<`. Registros com `ultima_coleta IS NULL` também são
+preservados: uma data desconhecida não prova ausência por mais de 60 dias. Eles
+ficam fora de novas gerações até reaparecerem na coleta.
+
+No exercício SQL com tabelas temporárias e rollback, uma vaga vista há 61 dias
+perdeu seus dois embeddings; as vagas com 60 dias, 59 dias e data nula mantiveram
+seus vetores. A vaga original permaneceu após a exclusão. Na base real medida,
+havia 539 embeddings, zero candidatos e um registro com observação desconhecida;
+diagnóstico e execução removeram zero registros.
+
+A limpeza deixa espaço disponível para reutilização pelo PostgreSQL; a redução
+física imediata do tamanho da tabela não é garantida. As medições de crescimento
+e retenção precisam ser acompanhadas ao longo do tempo.
+
+A busca por cosseno com filtros, os links no resultado e a avaliação de top 5
+das duas variações são as próximas etapas da issue 7. As issues de assistente e
+avaliação de RAG ainda não estão implementadas.
 
 ## 🗄️ Modelos dbt
 
@@ -316,7 +512,7 @@ uv run dbt test --project-dir dbt/vagas --profiles-dir dbt/vagas
 ```
 
 Esse comando requer as variáveis `PG*` do perfil configuradas no ambiente.
-O workflow mantém o teto de 500 vagas por termo e o timeout de 30 minutos;
+O workflow mantém o teto de 500 vagas por termo e o timeout de 60 minutos;
 acompanhe os logs ao ampliar os termos para conferir duração e possíveis cortes.
 
 ## 👤 Autor
